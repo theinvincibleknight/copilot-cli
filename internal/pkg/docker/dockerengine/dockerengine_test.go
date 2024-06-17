@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	osexec "os/exec"
 	"path/filepath"
 	"strings"
@@ -36,15 +38,16 @@ func TestDockerCommand_Build(t *testing.T) {
 	var mockCmd *MockCmd
 
 	tests := map[string]struct {
-		path       string
-		context    string
-		tags       []string
-		args       map[string]string
-		target     string
-		cacheFrom  []string
-		envVars    map[string]string
-		labels     map[string]string
-		setupMocks func(controller *gomock.Controller)
+		path              string
+		dockerfileContent string
+		context           string
+		tags              []string
+		args              map[string]string
+		target            string
+		cacheFrom         []string
+		envVars           map[string]string
+		labels            map[string]string
+		setupMocks        func(controller *gomock.Controller)
 
 		wantedError error
 	}{
@@ -123,7 +126,6 @@ func TestDockerCommand_Build(t *testing.T) {
 					"-f", "mockPath/to/mockDockerfile"}, gomock.Any(), gomock.Any()).Return(nil)
 			},
 		},
-
 		"success with additional tags": {
 			path: mockPath,
 			tags: []string{mockTag1, mockTag2, mockTag3},
@@ -156,7 +158,6 @@ func TestDockerCommand_Build(t *testing.T) {
 					"-f", "mockPath/to/mockDockerfile"}, gomock.Any(), gomock.Any()).Return(nil)
 			},
 		},
-
 		"success with labels": {
 			path: mockPath,
 			tags: []string{"latest"},
@@ -176,7 +177,6 @@ func TestDockerCommand_Build(t *testing.T) {
 					"-f", "mockPath/to/mockDockerfile"}, gomock.Any(), gomock.Any()).Return(nil)
 			},
 		},
-
 		"runs with cache_from and target fields": {
 			path:      mockPath,
 			tags:      []string{"latest"},
@@ -191,6 +191,16 @@ func TestDockerCommand_Build(t *testing.T) {
 					"--target", "foobar",
 					filepath.FromSlash("mockPath/to"),
 					"-f", "mockPath/to/mockDockerfile"}, gomock.Any(), gomock.Any()).Return(nil)
+			},
+		},
+		"success with dockerfile content": {
+			dockerfileContent: "FROM scratch",
+			tags:              []string{"latest"},
+			setupMocks: func(c *gomock.Controller) {
+				mockCmd = NewMockCmd(c)
+				mockCmd.EXPECT().RunWithContext(ctx, "docker", []string{"build",
+					"-t", fmt.Sprintf("%s:%s", mockURI, "latest"),
+					"-"}, gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 			},
 		},
 	}
@@ -209,14 +219,15 @@ func TestDockerCommand_Build(t *testing.T) {
 				},
 			}
 			buildInput := BuildArguments{
-				Context:    tc.context,
-				Dockerfile: tc.path,
-				URI:        mockURI,
-				Args:       tc.args,
-				Target:     tc.target,
-				CacheFrom:  tc.cacheFrom,
-				Tags:       tc.tags,
-				Labels:     tc.labels,
+				Context:           tc.context,
+				Dockerfile:        tc.path,
+				DockerfileContent: tc.dockerfileContent,
+				URI:               mockURI,
+				Args:              tc.args,
+				Target:            tc.target,
+				CacheFrom:         tc.cacheFrom,
+				Tags:              tc.tags,
+				Labels:            tc.labels,
 			}
 			buf := new(strings.Builder)
 			got := s.Build(ctx, &buildInput, buf)
@@ -244,7 +255,7 @@ func TestDockerCommand_Login(t *testing.T) {
 
 		want error
 	}{
-		"wrap error returned from Run()": {
+		"wrap error returned from Login()": {
 			setupMocks: func(controller *gomock.Controller) {
 				mockCmd = NewMockCmd(controller)
 
@@ -414,7 +425,7 @@ func TestDockerCommand_CheckDockerEngineRunning(t *testing.T) {
 		"error running docker info": {
 			setupMocks: func(controller *gomock.Controller) {
 				mockCmd = NewMockCmd(controller)
-				mockCmd.EXPECT().Run("docker", []string{"info", "-f", "'{{json .}}'"}, gomock.Any()).Return(mockError)
+				mockCmd.EXPECT().Run("docker", []string{"info", "-f", "{{json .}}"}, gomock.Any()).Return(mockError)
 			},
 
 			wantedErr: fmt.Errorf("get docker info: some error"),
@@ -422,11 +433,12 @@ func TestDockerCommand_CheckDockerEngineRunning(t *testing.T) {
 		"return when docker engine is not started": {
 			setupMocks: func(controller *gomock.Controller) {
 				mockCmd = NewMockCmd(controller)
-				mockCmd.EXPECT().Run("docker", []string{"info", "-f", "'{{json .}}'"}, gomock.Any()).
+				mockCmd.EXPECT().Run("docker", []string{"info", "-f", "{{json .}}"}, gomock.Any()).
 					Do(func(_ string, _ []string, opt exec.CmdOption) {
 						cmd := &osexec.Cmd{}
 						opt(cmd)
-						_, _ = cmd.Stdout.Write([]byte(`'{"ServerErrors":["Cannot connect to the Docker daemon at unix:///var/run/docker.sock.", "Is the docker daemon running?"]}'`))
+						_, _ = cmd.Stdout.Write([]byte(`Cannot connect to the Docker daemon at unix:///Users/penghaoh/.docker/run/docker.sock. Is the docker daemon running?
+'{"ID":"","Containers":0,"ContainersRunning":0,"ServerErrors":["Cannot connect to the Docker daemon at unix:///var/run/docker.sock.", "Is the docker daemon running?"]}'`))
 					}).Return(nil)
 			},
 
@@ -437,7 +449,7 @@ func TestDockerCommand_CheckDockerEngineRunning(t *testing.T) {
 		"success": {
 			setupMocks: func(controller *gomock.Controller) {
 				mockCmd = NewMockCmd(controller)
-				mockCmd.EXPECT().Run("docker", []string{"info", "-f", "'{{json .}}'"}, gomock.Any()).
+				mockCmd.EXPECT().Run("docker", []string{"info", "-f", "{{json .}}"}, gomock.Any()).
 					Do(func(_ string, _ []string, opt exec.CmdOption) {
 						cmd := &osexec.Cmd{}
 						opt(cmd)
@@ -672,10 +684,33 @@ func TestDockerCommand_Run(t *testing.T) {
 				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"run",
 					"--name", mockPauseContainer,
 					"mockImageUri",
-					"sleep", "infinity"}, gomock.Any(), gomock.Any()).Return(mockError)
+					"sleep", "infinity"}, gomock.Any(), gomock.Any(), gomock.Any()).Return(mockError)
 			},
 			wantedError: fmt.Errorf("running container: %w", mockError),
 		},
+
+		"should return error when container exits": {
+			containerName: mockPauseContainer,
+			command:       mockCommand,
+			uri:           mockImageURI,
+			setupMocks: func(controller *gomock.Controller) {
+				mockCmd = NewMockCmd(controller)
+
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"run",
+					"--name", mockPauseContainer,
+					"mockImageUri",
+					"sleep", "infinity"}, gomock.Any(), gomock.Any(), gomock.Any()).
+					DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+						// Simulate an zero exit code.
+						return &osexec.ExitError{ProcessState: &os.ProcessState{}}
+					})
+			},
+			wantedError: &ErrContainerExited{
+				name:     mockPauseContainer,
+				exitcode: 0,
+			},
+		},
+
 		"success with run options for pause container": {
 			containerName: mockPauseContainer,
 			ports:         mockContainerPorts,
@@ -688,7 +723,7 @@ func TestDockerCommand_Run(t *testing.T) {
 					"--publish", "8080:8080",
 					"--publish", "8081:8081",
 					mockImageURI,
-					"sleep", "infinity"}), gomock.Any(), gomock.Any()).Return(nil)
+					"sleep", "infinity"}), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 			},
 		},
 		"success with run options for service containers": {
@@ -707,7 +742,7 @@ func TestDockerCommand_Run(t *testing.T) {
 					"--env", "COPILOT_APPLICATION_NAME=mockAppName",
 					"--env", "COPILOT_SERVICE_NAME=mockSvcName",
 					"--env", "COPILOT_ENVIRONMENT_NAME=mockEnvName",
-					mockImageURI}), gomock.Any(), gomock.Any()).Return(nil)
+					mockImageURI}), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
 			},
 		},
 		"logs are successfully copied to expected target": {
@@ -727,7 +762,7 @@ func TestDockerCommand_Run(t *testing.T) {
 					"--env", "COPILOT_APPLICATION_NAME=mockAppName",
 					"--env", "COPILOT_SERVICE_NAME=mockSvcName",
 					"--env", "COPILOT_ENVIRONMENT_NAME=mockEnvName",
-					mockImageURI}), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+					mockImageURI}), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
 					// nab stdin and stderr
 					cmd := &osexec.Cmd{}
 					for _, opt := range opts {
@@ -791,41 +826,352 @@ func TestDockerCommand_IsContainerRunning(t *testing.T) {
 	mockError := errors.New("some error")
 	mockContainerName := "mockContainer"
 	mockUnknownContainerName := "mockUnknownContainer"
-	var mockCmd *MockCmd
 
 	tests := map[string]struct {
-		setupMocks      func(controller *gomock.Controller)
+		setupMocks      func(controller *gomock.Controller) *MockCmd
 		inContainerName string
-
-		wantedErr error
+		wantRunning     bool
+		wantedErr       error
 	}{
 		"error running docker info": {
 			inContainerName: mockUnknownContainerName,
-			setupMocks: func(controller *gomock.Controller) {
-				mockCmd = NewMockCmd(controller)
-				mockCmd.EXPECT().Run("docker", []string{"ps", "-q", "--filter", "name=mockUnknownContainer"}, gomock.Any()).Return(mockError)
+			setupMocks: func(controller *gomock.Controller) *MockCmd {
+				mockCmd := NewMockCmd(controller)
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"ps", "-a", "-q", "--filter", "name=mockUnknownContainer"}, gomock.Any()).Return(mockError)
+				return mockCmd
 			},
-
 			wantedErr: fmt.Errorf("run docker ps: some error"),
 		},
 		"successfully check if the container is running": {
 			inContainerName: mockContainerName,
-			setupMocks: func(controller *gomock.Controller) {
-				mockCmd = NewMockCmd(controller)
-				mockCmd.EXPECT().Run("docker", []string{"ps", "-q", "--filter", "name=mockContainer"}, gomock.Any()).Return(nil)
+			setupMocks: func(controller *gomock.Controller) *MockCmd {
+				mockCmd := NewMockCmd(controller)
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"ps", "-a", "-q", "--filter", "name=mockContainer"}, gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+					cmd := &osexec.Cmd{}
+					for _, opt := range opts {
+						opt(cmd)
+					}
+					cmd.Stdout.Write([]byte("53d6417769ed"))
+					return nil
+				})
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"inspect", "--format", "{{json .State}}", "53d6417769ed"}, gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+					cmd := &osexec.Cmd{}
+					for _, opt := range opts {
+						opt(cmd)
+					}
+					cmd.Stdout.Write([]byte(`
+{
+   "Status": "running"
+}`))
+					return nil
+				})
+				return mockCmd
 			},
+		},
+		"return that container is exited": {
+			inContainerName: mockContainerName,
+			setupMocks: func(controller *gomock.Controller) *MockCmd {
+				mockCmd := NewMockCmd(controller)
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"ps", "-a", "-q", "--filter", "name=mockContainer"}, gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+					cmd := &osexec.Cmd{}
+					for _, opt := range opts {
+						opt(cmd)
+					}
+					cmd.Stdout.Write([]byte("53d6417769ed"))
+					return nil
+				})
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"inspect", "--format", "{{json .State}}", "53d6417769ed"}, gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+					cmd := &osexec.Cmd{}
+					for _, opt := range opts {
+						opt(cmd)
+					}
+					cmd.Stdout.Write([]byte(`
+{
+    "Status": "exited"
+}`))
+					return nil
+				})
+				return mockCmd
+			},
+			wantedErr: fmt.Errorf(`container "mockContainer" exited with code 0`),
 		},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			controller := gomock.NewController(t)
-			tc.setupMocks(controller)
 			s := DockerCmdClient{
-				runner: mockCmd,
+				runner: tc.setupMocks(controller),
 			}
-			_, err := s.IsContainerRunning(tc.inContainerName)
+			_, err := s.IsContainerRunning(context.Background(), tc.inContainerName)
 			if tc.wantedErr != nil {
 				require.EqualError(t, err, tc.wantedErr.Error())
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestDockerCommand_Exec(t *testing.T) {
+	tests := map[string]struct {
+		setupMocks func(controller *gomock.Controller) *MockCmd
+
+		wantErr string
+	}{
+		"return error": {
+			setupMocks: func(ctrl *gomock.Controller) *MockCmd {
+				mockCmd := NewMockCmd(ctrl)
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker",
+					[]string{"exec", "ctr", "sleep", "infinity"},
+					gomock.Any(), gomock.Any()).Return(errors.New("some error"))
+				return mockCmd
+			},
+			wantErr: "some error",
+		},
+		"happy path": {
+			setupMocks: func(ctrl *gomock.Controller) *MockCmd {
+				mockCmd := NewMockCmd(ctrl)
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker",
+					[]string{"exec", "ctr", "sleep", "infinity"},
+					gomock.Any(), gomock.Any()).Return(nil)
+				return mockCmd
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			s := DockerCmdClient{
+				runner: tc.setupMocks(ctrl),
+			}
+
+			err := s.Exec(context.Background(), "ctr", io.Discard, "sleep", "infinity")
+			if tc.wantErr != "" {
+				require.EqualError(t, err, tc.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestDockerCommand_IsContainerHealthy(t *testing.T) {
+	tests := map[string]struct {
+		mockContainerName string
+		mockHealthStatus  string
+		setupMocks        func(*gomock.Controller) *MockCmd
+		wantHealthy       bool
+		wantErr           error
+	}{
+		"unhealthy container": {
+			mockContainerName: "mockContainer",
+			mockHealthStatus:  "unhealthy",
+			setupMocks: func(controller *gomock.Controller) *MockCmd {
+				mockCmd := NewMockCmd(controller)
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"ps", "-a", "-q", "--filter", "name=mockContainer"}, gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+					cmd := &osexec.Cmd{}
+					for _, opt := range opts {
+						opt(cmd)
+					}
+					cmd.Stdout.Write([]byte("53d6417769ed"))
+					return nil
+				})
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"inspect", "--format", "{{json .State}}", "53d6417769ed"}, gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+					cmd := &osexec.Cmd{}
+					for _, opt := range opts {
+						opt(cmd)
+					}
+					cmd.Stdout.Write([]byte(`
+{
+    "Status": "running",
+    "Running": true,
+    "Health": {
+        "Status": "unhealthy"
+    }
+}`))
+					return nil
+				})
+				return mockCmd
+			},
+			wantHealthy: false,
+			wantErr:     fmt.Errorf(`container "mockContainer" is "unhealthy"`),
+		},
+
+		"healthy container": {
+			mockContainerName: "mockContainer",
+			mockHealthStatus:  "unhealthy",
+			setupMocks: func(controller *gomock.Controller) *MockCmd {
+				mockCmd := NewMockCmd(controller)
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"ps", "-a", "-q", "--filter", "name=mockContainer"}, gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+					cmd := &osexec.Cmd{}
+					for _, opt := range opts {
+						opt(cmd)
+					}
+					cmd.Stdout.Write([]byte("53d6417769ed"))
+					return nil
+				})
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"inspect", "--format", "{{json .State}}", "53d6417769ed"}, gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+					cmd := &osexec.Cmd{}
+					for _, opt := range opts {
+						opt(cmd)
+					}
+					cmd.Stdout.Write([]byte(`
+{
+    "Status": "running",
+    "Running": true,
+    "Health": {
+        "Status": "healthy"
+    }
+}`))
+					return nil
+				})
+				return mockCmd
+			},
+			wantHealthy: true,
+			wantErr:     nil,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			s := DockerCmdClient{
+				runner: tc.setupMocks(ctrl), // Correctly invoke the setupMocks function
+			}
+
+			expected, err := s.IsContainerHealthy(context.Background(), tc.mockContainerName)
+			require.Equal(t, tc.wantHealthy, expected)
+			if tc.wantErr != nil {
+				require.EqualError(t, err, tc.wantErr.Error())
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestDockerCommand_ContainerExitCode(t *testing.T) {
+	tests := map[string]struct {
+		mockContainerName string
+		mockHealthStatus  string
+		setupMocks        func(*gomock.Controller) *MockCmd
+		wantExitCode      int
+		wantErr           error
+	}{
+		"container successfully complete": {
+			mockContainerName: "mockContainer",
+			mockHealthStatus:  "unhealthy",
+			setupMocks: func(controller *gomock.Controller) *MockCmd {
+				mockCmd := NewMockCmd(controller)
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"ps", "-a", "-q", "--filter", "name=mockContainer"}, gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+					cmd := &osexec.Cmd{}
+					for _, opt := range opts {
+						opt(cmd)
+					}
+					cmd.Stdout.Write([]byte("53d6417769ed"))
+					return nil
+				})
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"inspect", "--format", "{{json .State}}", "53d6417769ed"}, gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+					cmd := &osexec.Cmd{}
+					for _, opt := range opts {
+						opt(cmd)
+					}
+					cmd.Stdout.Write([]byte(`
+{
+    "Status": "exited",
+    "ExitCode": 143
+}`))
+					return nil
+				})
+				return mockCmd
+			},
+			wantExitCode: 143,
+		},
+		"container success": {
+			mockContainerName: "mockContainer",
+			mockHealthStatus:  "unhealthy",
+			setupMocks: func(controller *gomock.Controller) *MockCmd {
+				mockCmd := NewMockCmd(controller)
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"ps", "-a", "-q", "--filter", "name=mockContainer"}, gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+					cmd := &osexec.Cmd{}
+					for _, opt := range opts {
+						opt(cmd)
+					}
+					cmd.Stdout.Write([]byte("53d6417769ed"))
+					return nil
+				})
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"inspect", "--format", "{{json .State}}", "53d6417769ed"}, gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+					cmd := &osexec.Cmd{}
+					for _, opt := range opts {
+						opt(cmd)
+					}
+					cmd.Stdout.Write([]byte(`
+{
+    "Status": "exited",
+    "ExitCode": 0
+}`))
+					return nil
+				})
+				return mockCmd
+			},
+		},
+		"error when fetching container state": {
+			mockContainerName: "mockContainer",
+			mockHealthStatus:  "unhealthy",
+			setupMocks: func(controller *gomock.Controller) *MockCmd {
+				mockCmd := NewMockCmd(controller)
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"ps", "-a", "-q", "--filter", "name=mockContainer"}, gomock.Any()).Return(fmt.Errorf("some error"))
+				return mockCmd
+			},
+			wantErr: fmt.Errorf("run docker ps: some error"),
+		},
+		"return err if container is running": {
+			mockContainerName: "mockContainer",
+			mockHealthStatus:  "unhealthy",
+			setupMocks: func(controller *gomock.Controller) *MockCmd {
+				mockCmd := NewMockCmd(controller)
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"ps", "-a", "-q", "--filter", "name=mockContainer"}, gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+					cmd := &osexec.Cmd{}
+					for _, opt := range opts {
+						opt(cmd)
+					}
+					cmd.Stdout.Write([]byte("53d6417769ed"))
+					return nil
+				})
+				mockCmd.EXPECT().RunWithContext(gomock.Any(), "docker", []string{"inspect", "--format", "{{json .State}}", "53d6417769ed"}, gomock.Any()).DoAndReturn(func(ctx context.Context, name string, args []string, opts ...exec.CmdOption) error {
+					cmd := &osexec.Cmd{}
+					for _, opt := range opts {
+						opt(cmd)
+					}
+					cmd.Stdout.Write([]byte(`
+{
+    "Status": "running",
+    "ExitCode": 0
+}`))
+					return nil
+				})
+				return mockCmd
+			},
+			wantErr: fmt.Errorf(`container "mockContainer" has not exited`),
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			s := DockerCmdClient{
+				runner: tc.setupMocks(ctrl),
+			}
+
+			expectedCode, err := s.ContainerExitCode(context.Background(), tc.mockContainerName)
+			require.Equal(t, tc.wantExitCode, expectedCode)
+			if tc.wantErr != nil {
+				require.EqualError(t, err, tc.wantErr.Error())
 			} else {
 				require.NoError(t, err)
 			}

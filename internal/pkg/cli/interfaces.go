@@ -183,8 +183,10 @@ type repositoryService interface {
 	imageBuilderPusher
 }
 
-type ecsLocalClient interface {
+type ecsClient interface {
 	TaskDefinition(app, env, svc string) (*awsecs.TaskDefinition, error)
+	ServiceConnectServices(app, env, svc string) ([]*awsecs.Service, error)
+	DescribeService(app, env, svc string) (*ecs.ServiceDesc, error)
 }
 
 type logEventsWriter interface {
@@ -455,7 +457,7 @@ type deployer interface {
 }
 
 type domainHostedZoneGetter interface {
-	DomainHostedZoneID(domainName string) (string, error)
+	PublicDomainHostedZoneID(domainName string) (string, error)
 	ValidateDomainOwnership(domainName string) error
 }
 
@@ -470,7 +472,6 @@ type statusDescriber interface {
 
 type envDescriber interface {
 	Describe() (*describe.EnvDescription, error)
-	PublicCIDRBlocks() ([]string, error)
 	Manifest() ([]byte, error)
 	ValidateCFServiceDomainAliases() error
 }
@@ -554,6 +555,7 @@ type wsSelector interface {
 	Service(prompt, help string) (string, error)
 	Job(prompt, help string) (string, error)
 	Workload(msg, help string) (string, error)
+	Workloads(msg, help string) ([]string, error)
 }
 
 type staticSourceSelector interface {
@@ -704,9 +706,13 @@ type templateDiffer interface {
 type dockerEngineRunner interface {
 	CheckDockerEngineRunning() error
 	Run(context.Context, *dockerengine.RunOptions) error
-	IsContainerRunning(string) (bool, error)
-	Stop(string) error
-	Rm(string) error
+	IsContainerRunning(context.Context, string) (bool, error)
+	Stop(context.Context, string) error
+	Build(context.Context, *dockerengine.BuildArguments, io.Writer) error
+	Exec(ctx context.Context, container string, out io.Writer, cmd string, args ...string) error
+	ContainerExitCode(ctx context.Context, containerName string) (int, error)
+	IsContainerHealthy(ctx context.Context, containerName string) (bool, error)
+	Rm(context.Context, string) error
 }
 
 type workloadStackGenerator interface {
@@ -748,4 +754,8 @@ type stackConfiguration interface {
 
 type secretGetter interface {
 	GetSecretValue(context.Context, string) (string, error)
+}
+
+type dockerWorkload interface {
+	Dockerfile() string
 }

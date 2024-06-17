@@ -182,6 +182,11 @@ func (s *LoadBalancedWebService) requiredEnvironmentFeatures() []string {
 	return features
 }
 
+// Dockerfile returns the relative path of the Dockerfile in the manifest.
+func (s *LoadBalancedWebService) Dockerfile() string {
+	return s.ImageConfig.Image.dockerfilePath()
+}
+
 // Port returns the exposed port in the manifest.
 // A LoadBalancedWebService always has a port exposed therefore the boolean is always true.
 func (s *LoadBalancedWebService) Port() (port uint16, ok bool) {
@@ -212,6 +217,12 @@ func (s *LoadBalancedWebService) BuildArgs(contextDir string) (map[string]*Docke
 // and the values are either env file paths or empty strings.
 func (s *LoadBalancedWebService) EnvFiles() map[string]string {
 	return envFiles(s.Name, s.TaskConfig, s.Logging, s.Sidecars)
+}
+
+// ContainerDependencies returns a map of ContainerDependency objects for the LoadBalancedWebService
+// including dependencies for its main container, any logging sidecar, and additional sidecars.
+func (s *LoadBalancedWebService) ContainerDependencies() map[string]ContainerDependency {
+	return containerDependencies(aws.StringValue(s.Name), s.ImageConfig.Image, s.Logging, s.Sidecars)
 }
 
 func (s *LoadBalancedWebService) subnets() *SubnetListOrArgs {
@@ -269,6 +280,32 @@ func (c *NetworkLoadBalancerConfiguration) IsEmpty() bool {
 func (c *NetworkLoadBalancerListener) IsEmpty() bool {
 	return c.Port == nil && c.HealthCheck.isEmpty() && c.TargetContainer == nil && c.TargetPort == nil &&
 		c.SSLPolicy == nil && c.Stickiness == nil && c.DeregistrationDelay == nil
+}
+
+// HealthCheckPort returns the port a HealthCheck is set to for a NetworkLoadBalancerListener.
+func (listener NetworkLoadBalancerListener) HealthCheckPort(mainContainerPort *uint16) (uint16, error) {
+	// healthCheckPort is defined by Listener.HealthCheck.Port, with fallback on Listener.TargetPort, then Listener.Port.
+	if listener.HealthCheck.Port != nil {
+		return uint16(aws.IntValue(listener.HealthCheck.Port)), nil
+	}
+	if listener.TargetPort != nil {
+		return uint16(aws.IntValue(listener.TargetPort)), nil
+	}
+	if listener.Port != nil {
+		port, _, err := ParsePortMapping(listener.Port)
+		if err != nil {
+			return 0, err
+		}
+		parsedPort, err := strconv.ParseUint(aws.StringValue(port), 10, 16)
+		if err != nil {
+			return 0, err
+		}
+		return uint16(parsedPort), nil
+	}
+	if mainContainerPort != nil {
+		return aws.Uint16Value(mainContainerPort), nil
+	}
+	return 0, nil
 }
 
 // ExposedPorts returns all the ports that are container ports available to receive traffic.

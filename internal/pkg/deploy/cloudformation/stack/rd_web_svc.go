@@ -53,8 +53,9 @@ type RequestDrivenWebServiceConfig struct {
 	App                deploy.AppInformation
 	Env                string
 	Manifest           *manifest.RequestDrivenWebService
-	RawManifest        []byte
+	RawManifest        string
 	ArtifactBucketName string
+	ArtifactKey        string
 	RuntimeConfig      RuntimeConfig
 	Addons             NestedStackConfigurer
 }
@@ -75,6 +76,7 @@ func NewRequestDrivenWebService(cfg RequestDrivenWebServiceConfig) (*RequestDriv
 				app:                cfg.App.Name,
 				permBound:          cfg.App.PermissionsBoundary,
 				artifactBucketName: cfg.ArtifactBucketName,
+				artifactKey:        cfg.ArtifactKey,
 				rc:                 cfg.RuntimeConfig,
 				image:              cfg.Manifest.ImageConfig.Image,
 				rawManifest:        cfg.RawManifest,

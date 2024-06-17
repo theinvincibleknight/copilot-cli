@@ -15,6 +15,9 @@ Parameters:
     Description: URL of the addons nested stack template within the S3 bucket.
     Type: String
     Default: ""
+  ArtifactKeyARN:
+    Type: String
+    Description: 'KMS Key used for encrypting artifacts'
 
 Conditions:
   HasAddons: !Not [!Equals [!Ref AddonsTemplateURL, ""]]
@@ -141,7 +144,7 @@ Resources:
     Properties:
       Handler: index.handler
       Role: !GetAtt TriggerStateMachineFunctionRole.Arn
-      Runtime: nodejs16.x
+      Runtime: nodejs20.x
       Timeout: 900
       MemorySize: 512
 
@@ -284,6 +287,13 @@ Resources:
                 Resource:
                   - arn:aws:s3:::stackset-bucket/mappingfile
                   - arn:aws:s3:::stackset-bucket/local-assets/*
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ArtifactKeyARN
+                Condition:
+                  StringEquals:
+                    kms:EncryptionContext:aws:s3:arn: "arn:aws:s3:::stackset-bucket"
+                    kms:ViaService: !Sub 's3.${AWS::Region}.amazonaws.com'
         - PolicyName: ServiceBucketAccess
           PolicyDocument:
             Version: 2012-10-17
@@ -344,6 +354,19 @@ Resources:
             Resource:
               - !Sub arn:aws:s3:::${Bucket}
               - !Sub arn:aws:s3:::${Bucket}/*
+
+  AddonsStack:
+    Metadata:
+      'aws:copilot:description': 'An Addons CloudFormation Stack for your additional AWS resources'
+    Type: AWS::CloudFormation::Stack
+    Condition: HasAddons
+    Properties:
+      Parameters:
+        App: !Ref AppName
+        Env: !Ref EnvName
+        Name: !Ref WorkloadName
+      TemplateURL:
+        !Ref AddonsTemplateURL
 
 Outputs:
   CloudFrontDistributionDomainName:

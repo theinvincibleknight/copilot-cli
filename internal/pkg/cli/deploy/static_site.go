@@ -163,12 +163,14 @@ func (d *staticSiteDeployer) stackConfiguration(in *StackRuntimeConfiguration) (
 	if err := validateMinAppVersion(d.app.Name, d.name, d.appVersionGetter, version.AppTemplateMinStaticSite); err != nil {
 		return nil, fmt.Errorf("static sites not supported: %w", err)
 	}
+
 	conf, err := d.newStack(&stack.StaticSiteConfig{
 		App:                d.app,
 		EnvManifest:        d.envConfig,
 		Manifest:           d.staticSiteMft,
 		RawManifest:        d.rawMft,
 		ArtifactBucketName: d.resources.S3Bucket,
+		ArtifactKey:        d.resources.KMSKeyARN,
 		RuntimeConfig:      *rc,
 		RootUserARN:        in.RootUserARN,
 		Addons:             d.addons,

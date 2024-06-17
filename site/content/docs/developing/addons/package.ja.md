@@ -20,7 +20,7 @@ Copilot は、Addon テンプレートから参照されるローカルファイ
               Timeout: 900
               MemorySize: 512
               Role: !GetAtt "ExampleFunctionRole.Arn"
-              Runtime: nodejs16.x
+              Runtime: nodejs20.x
         ```
     
     === "lambdas/example/index.js"
@@ -84,7 +84,7 @@ zip が必要な一部のリソース (`AWS::Serverless::Function` など) で�
         Timeout: 60
         MemorySize: 512
         Role: !GetAtt "recordProcessorRole.Arn"
-        Runtime: nodejs16.x
+        Runtime: nodejs20.x
 
     recordProcessorRole:
       Type: AWS::IAM::Role
@@ -125,7 +125,7 @@ zip が必要な一部のリソース (`AWS::Serverless::Function` など) で�
 4. Lambda 関数を書いてください。
   ```js title="lambdas/record-processor/index.js"
   "use strict";
-  const AWS = require('aws-sdk');
+  const { unmarshall } = require('@aws-sdk/util-dynamodb');
 
   exports.handler = async function (event, context) {
     for (const record of event?.Records) {
@@ -134,7 +134,7 @@ zip が必要な一部のリソース (`AWS::Serverless::Function` など) で�
       }
 
       // process new records
-      const item = AWS.DynamoDB.Converter.unmarshall(record?.dynamodb?.NewImage);
+      const item = unmarshall(record?.dynamodb?.NewImage);
       console.log("processing item", item);
     }
   };

@@ -27,6 +27,9 @@ Parameters:
     Description: URL of the addons nested stack template within the S3 bucket.
     Type: String
     Default: ""
+  ArtifactKeyARN:
+    Type: String
+    Description: 'KMS Key used for encrypting artifacts'
 
 Conditions:
   HasAddons: !Not [!Equals [!Ref AddonsTemplateURL, ""]]
@@ -98,7 +101,7 @@ Resources:
       OriginAccessControlConfig:
         Description: !Sub 'Access control for static s3 origin for ${AppName}-${EnvName}-${WorkloadName}'
         # Truncate the name to allow at most 64 characters.
-        Name: {{trancateWithHashPadding (printf "%s-%s-%s" .AppName .EnvName .WorkloadName) 58 6}}
+        Name: {{truncateWithHashPadding (printf "%s-%s-%s" .AppName .EnvName .WorkloadName) 58 6}}
         OriginAccessControlOriginType: s3
         SigningBehavior: always
         SigningProtocol: sigv4
@@ -115,7 +118,7 @@ Resources:
         Comment: CloudFront Function to rewrite viewer request to index.html
         Runtime: cloudfront-js-1.0
       # Truncate the name to allow at most 64 characters.
-      Name: {{trancateWithHashPadding (printf "%s-%s-%s" .AppName .EnvName .WorkloadName) 58 6}}
+      Name: {{truncateWithHashPadding (printf "%s-%s-%s" .AppName .EnvName .WorkloadName) 58 6}}
 
   CloudFrontDistribution:
     Metadata:
@@ -163,7 +166,7 @@ Resources:
     Properties:
       Handler: index.handler
       Role: !GetAtt TriggerStateMachineFunctionRole.Arn
-      Runtime: nodejs16.x
+      Runtime: nodejs20.x
       Timeout: 900
       MemorySize: 512
       {{- with $cr := index .CustomResources "TriggerStateMachineFunction" }}
@@ -327,6 +330,13 @@ Resources:
                 Resource:
                   - arn:aws:s3:::{{.AssetMappingFileBucket}}/{{.AssetMappingFilePath}}
                   - arn:aws:s3:::{{.AssetMappingFileBucket}}/local-assets/*
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref ArtifactKeyARN
+                Condition:
+                  StringEquals:
+                    kms:EncryptionContext:aws:s3:arn: "arn:aws:s3:::{{.AssetMappingFileBucket}}"
+                    kms:ViaService: !Sub 's3.${AWS::Region}.amazonaws.com'
         - PolicyName: ServiceBucketAccess
           PolicyDocument:
             Version: 2012-10-17
@@ -420,7 +430,7 @@ Resources:
       Timeout: 900
       MemorySize: 512
       Role: !GetAtt 'CustomDomainRole.Arn'
-      Runtime: nodejs16.x
+      Runtime: nodejs20.x
 
   CustomDomainRole:
     Metadata:
@@ -491,7 +501,7 @@ Resources:
       Timeout: 900
       MemorySize: 512
       Role: !GetAtt 'CertificateValidatorRole.Arn'
-      Runtime: nodejs16.x
+      Runtime: nodejs20.x
 
   CertificateValidatorRole:
     Metadata:
@@ -562,6 +572,8 @@ Resources:
       ManagedPolicyArns:
         - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 {{- end}}
+
+{{include "addons" . | indent 2}}
 
 Outputs:
   CloudFrontDistributionDomainName:

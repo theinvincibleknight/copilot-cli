@@ -33,10 +33,11 @@ type StaticSiteConfig struct {
 	App                *config.Application
 	EnvManifest        *manifest.Environment
 	Manifest           *manifest.StaticSite
-	RawManifest        []byte // Content of the manifest file without any transformations.
+	RawManifest        string
 	RuntimeConfig      RuntimeConfig
 	RootUserARN        string
 	ArtifactBucketName string
+	ArtifactKey        string
 	Addons             NestedStackConfigurer
 	AssetMappingURL    string
 }
@@ -66,6 +67,7 @@ func NewStaticSite(cfg *StaticSiteConfig) (*StaticSite, error) {
 			app:                cfg.App.Name,
 			permBound:          cfg.App.PermissionsBoundary,
 			artifactBucketName: cfg.ArtifactBucketName,
+			artifactKey:        cfg.ArtifactKey,
 			rc:                 cfg.RuntimeConfig,
 			rawManifest:        cfg.RawManifest,
 			parser:             fs,
@@ -162,6 +164,10 @@ func (s *StaticSite) Parameters() ([]*cloudformation.Parameter, error) {
 		{
 			ParameterKey:   aws.String(WorkloadAddonsTemplateURLParamKey),
 			ParameterValue: aws.String(s.rc.AddonsTemplateURL),
+		},
+		{
+			ParameterKey:   aws.String(WorkloadArtifactKeyARNParamKey),
+			ParameterValue: aws.String(s.wkld.artifactKey),
 		},
 	}, nil
 }

@@ -6,6 +6,8 @@ package deploy
 import (
 	"fmt"
 
+	"github.com/aws/copilot-cli/internal/pkg/aws/elbv2"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/copilot-cli/internal/pkg/aws/acm"
@@ -13,7 +15,6 @@ import (
 	awsecs "github.com/aws/copilot-cli/internal/pkg/aws/ecs"
 	"github.com/aws/copilot-cli/internal/pkg/aws/partitions"
 	"github.com/aws/copilot-cli/internal/pkg/config"
-	"github.com/aws/copilot-cli/internal/pkg/deploy"
 	"github.com/aws/copilot-cli/internal/pkg/deploy/cloudformation"
 	"github.com/aws/copilot-cli/internal/pkg/deploy/cloudformation/stack"
 	"github.com/aws/copilot-cli/internal/pkg/deploy/upload/customresource"
@@ -42,16 +43,15 @@ var (
 		color.HighlightCode("copilot app init --domain example.com"))
 )
 
-// TODO(Aiden): remove when NetworkLoadBalancer is forcibly updated
-type publicCIDRBlocksGetter interface {
-	PublicCIDRBlocks() ([]string, error)
+type elbGetter interface {
+	LoadBalancer(nameOrARN string) (*elbv2.LoadBalancer, error)
 }
 
 type lbWebSvcDeployer struct {
 	*svcDeployer
-	appVersionGetter       versionGetter
-	publicCIDRBlocksGetter publicCIDRBlocksGetter
-	lbMft                  *manifest.LoadBalancedWebService
+	appVersionGetter versionGetter
+	elbGetter        elbGetter
+	lbMft            *manifest.LoadBalancedWebService
 
 	// Overriden in tests.
 	newAliasCertValidator func(optionalRegion *string) aliasCertValidator
@@ -70,18 +70,6 @@ func NewLBWSDeployer(in *WorkloadDeployerInput) (*lbWebSvcDeployer, error) {
 		return nil, fmt.Errorf("new app describer for application %s: %w", in.App.Name, err)
 	}
 
-	// TODO(Aiden): remove when NetworkLoadBalancer is forcibly updated
-	deployStore, err := deploy.NewStore(in.SessionProvider, svcDeployer.store)
-	if err != nil {
-		return nil, fmt.Errorf("new deploy store: %w", err)
-	}
-	envDescriber, err := describe.NewEnvDescriber(describe.NewEnvDescriberConfig{
-		App:         in.App.Name,
-		Env:         in.Env.Name,
-		ConfigStore: svcDeployer.store,
-		DeployStore: deployStore,
-	})
-
 	if err != nil {
 		return nil, fmt.Errorf("create describer for environment %s in application %s: %w", in.Env.Name, in.App.Name, err)
 	}
@@ -90,10 +78,10 @@ func NewLBWSDeployer(in *WorkloadDeployerInput) (*lbWebSvcDeployer, error) {
 		return nil, fmt.Errorf("manifest is not of type %s", manifestinfo.LoadBalancedWebServiceType)
 	}
 	return &lbWebSvcDeployer{
-		svcDeployer:            svcDeployer,
-		appVersionGetter:       versionGetter,
-		publicCIDRBlocksGetter: envDescriber,
-		lbMft:                  lbMft,
+		svcDeployer:      svcDeployer,
+		appVersionGetter: versionGetter,
+		elbGetter:        elbv2.New(svcDeployer.envSess),
+		lbMft:            lbMft,
 		newAliasCertValidator: func(optionalRegion *string) aliasCertValidator {
 			sess := svcDeployer.envSess.Copy(&aws.Config{
 				Region: optionalRegion,
@@ -155,12 +143,12 @@ func (d *lbWebSvcDeployer) stackConfiguration(in *StackRuntimeConfiguration) (*s
 		return nil, err
 	}
 	var opts []stack.LoadBalancedWebServiceOption
-	if !d.lbMft.NLBConfig.IsEmpty() {
-		cidrBlocks, err := d.publicCIDRBlocksGetter.PublicCIDRBlocks()
+	if d.lbMft.HTTPOrBool.ImportedALB != nil {
+		lb, err := d.elbGetter.LoadBalancer(aws.StringValue(d.lbMft.HTTPOrBool.ImportedALB))
 		if err != nil {
-			return nil, fmt.Errorf("get public CIDR blocks information from the VPC of environment %s: %w", d.env.Name, err)
+			return nil, err
 		}
-		opts = append(opts, stack.WithNLB(cidrBlocks))
+		opts = append(opts, stack.WithImportedALB(lb))
 	}
 
 	var conf cloudformation.StackConfiguration
@@ -174,6 +162,7 @@ func (d *lbWebSvcDeployer) stackConfiguration(in *StackRuntimeConfiguration) (*s
 			Manifest:           d.lbMft,
 			RawManifest:        d.rawMft,
 			ArtifactBucketName: d.resources.S3Bucket,
+			ArtifactKey:        d.resources.KMSKeyARN,
 			RuntimeConfig:      *rc,
 			RootUserARN:        in.RootUserARN,
 			Addons:             d.addons,
@@ -196,6 +185,10 @@ func (d *lbWebSvcDeployer) validateALBRuntime() error {
 		return nil
 	}
 
+	if err := d.validateImportedALBConfig(); err != nil {
+		return fmt.Errorf(`validate imported ALB configuration for "http": %w`, err)
+	}
+
 	if err := d.validateRuntimeRoutingRule(d.lbMft.HTTPOrBool.Main); err != nil {
 		return fmt.Errorf(`validate ALB runtime configuration for "http": %w`, err)
 	}
@@ -208,6 +201,34 @@ func (d *lbWebSvcDeployer) validateALBRuntime() error {
 	return nil
 }
 
+func (d *lbWebSvcDeployer) validateImportedALBConfig() error {
+	if d.lbMft.HTTPOrBool.ImportedALB == nil {
+		return nil
+	}
+	alb, err := d.elbGetter.LoadBalancer(aws.StringValue(d.lbMft.HTTPOrBool.ImportedALB))
+	if err != nil {
+		return fmt.Errorf(`retrieve load balancer %q: %w`, aws.StringValue(d.lbMft.HTTPOrBool.ImportedALB), err)
+	}
+	if len(alb.Listeners) == 0 || len(alb.Listeners) > 2 {
+		return fmt.Errorf(`imported ALB %q must have either one or two listeners`, alb.ARN)
+	}
+	if len(alb.Listeners) == 1 {
+		return nil
+	}
+	var isHTTP, isHTTPS bool
+	for _, listener := range alb.Listeners {
+		if listener.Protocol == "HTTP" {
+			isHTTP = true
+		} else if listener.Protocol == "HTTPS" {
+			isHTTPS = true
+		}
+	}
+	if !(isHTTP && isHTTPS) {
+		return fmt.Errorf("imported ALB must have listeners of protocol HTTP and HTTPS")
+	}
+	return nil
+}
+
 func (d *lbWebSvcDeployer) validateRuntimeRoutingRule(rule manifest.RoutingRule) error {
 	hasALBCerts := len(d.envConfig.HTTPConfig.Public.Certificates) != 0
 	hasCDNCerts := d.envConfig.CDNConfig.Config.Certificate != nil
@@ -216,7 +237,7 @@ func (d *lbWebSvcDeployer) validateRuntimeRoutingRule(rule manifest.RoutingRule)
 		return fmt.Errorf("cannot configure http to https redirect without having a domain associated with the app %q or importing any certificates in env %q", d.app.Name, d.env.Name)
 	}
 	if rule.Alias.IsEmpty() {
-		if hasImportedCerts {
+		if hasImportedCerts && d.lbMft.HTTPOrBool.ImportedALB == nil {
 			return &errSvcWithNoALBAliasDeployingToEnvWithImportedCerts{
 				name:    d.name,
 				envName: d.env.Name,

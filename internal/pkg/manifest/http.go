@@ -59,6 +59,7 @@ func (r *HTTPOrBool) UnmarshalYAML(value *yaml.Node) error {
 
 // HTTP holds options for application load balancer.
 type HTTP struct {
+	ImportedALB              *string       `yaml:"alb"`
 	Main                     RoutingRule   `yaml:",inline"`
 	TargetContainerCamelCase *string       `yaml:"targetContainer"` // Deprecated. Maintained for backwards compatibility, use [RoutingRule.TargetContainer] instead.
 	AdditionalRoutingRules   []RoutingRule `yaml:"additional_rules"`
@@ -74,7 +75,7 @@ func (cfg HTTP) RoutingRules() []RoutingRule {
 
 // IsEmpty returns true if HTTP has empty configuration.
 func (r *HTTP) IsEmpty() bool {
-	return r.Main.IsEmpty() && r.TargetContainerCamelCase == nil && len(r.AdditionalRoutingRules) == 0
+	return r.Main.IsEmpty() && r.TargetContainerCamelCase == nil && len(r.AdditionalRoutingRules) == 0 && r.ImportedALB == nil
 }
 
 // RoutingRule holds listener rule configuration for ALB.
@@ -99,6 +100,21 @@ func (r *RoutingRule) IsEmpty() bool {
 	return r.Path == nil && r.ProtocolVersion == nil && r.HealthCheck.IsZero() && r.Stickiness == nil && r.Alias.IsEmpty() &&
 		r.DeregistrationDelay == nil && r.TargetContainer == nil && r.TargetPort == nil && r.AllowedSourceIps == nil &&
 		r.HostedZone == nil && r.RedirectToHTTPS == nil
+}
+
+// HealthCheckPort returns the port a HealthCheck is set to for a RoutingRule.
+func (r *RoutingRule) HealthCheckPort(mainContainerPort *uint16) uint16 {
+	// healthCheckPort is defined by RoutingRule.HealthCheck.Port, with fallback on RoutingRule.TargetPort, then image.port.
+	if r.HealthCheck.Advanced.Port != nil {
+		return uint16(aws.IntValue(r.HealthCheck.Advanced.Port))
+	}
+	if r.TargetPort != nil {
+		return aws.Uint16Value(r.TargetPort)
+	}
+	if mainContainerPort != nil {
+		return aws.Uint16Value(mainContainerPort)
+	}
+	return 0
 }
 
 // IPNet represents an IP network string. For example: 10.1.0.0/16

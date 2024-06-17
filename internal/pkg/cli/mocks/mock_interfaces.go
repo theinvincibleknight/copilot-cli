@@ -1715,31 +1715,61 @@ func (mr *MockrepositoryServiceMockRecorder) Login() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*MockrepositoryService)(nil).Login))
 }
 
-// MockecsLocalClient is a mock of ecsLocalClient interface.
-type MockecsLocalClient struct {
+// MockecsClient is a mock of ecsClient interface.
+type MockecsClient struct {
 	ctrl     *gomock.Controller
-	recorder *MockecsLocalClientMockRecorder
+	recorder *MockecsClientMockRecorder
 }
 
-// MockecsLocalClientMockRecorder is the mock recorder for MockecsLocalClient.
-type MockecsLocalClientMockRecorder struct {
-	mock *MockecsLocalClient
+// MockecsClientMockRecorder is the mock recorder for MockecsClient.
+type MockecsClientMockRecorder struct {
+	mock *MockecsClient
 }
 
-// NewMockecsLocalClient creates a new mock instance.
-func NewMockecsLocalClient(ctrl *gomock.Controller) *MockecsLocalClient {
-	mock := &MockecsLocalClient{ctrl: ctrl}
-	mock.recorder = &MockecsLocalClientMockRecorder{mock}
+// NewMockecsClient creates a new mock instance.
+func NewMockecsClient(ctrl *gomock.Controller) *MockecsClient {
+	mock := &MockecsClient{ctrl: ctrl}
+	mock.recorder = &MockecsClientMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockecsLocalClient) EXPECT() *MockecsLocalClientMockRecorder {
+func (m *MockecsClient) EXPECT() *MockecsClientMockRecorder {
 	return m.recorder
 }
 
+// DescribeService mocks base method.
+func (m *MockecsClient) DescribeService(app, env, svc string) (*ecs0.ServiceDesc, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DescribeService", app, env, svc)
+	ret0, _ := ret[0].(*ecs0.ServiceDesc)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DescribeService indicates an expected call of DescribeService.
+func (mr *MockecsClientMockRecorder) DescribeService(app, env, svc interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DescribeService", reflect.TypeOf((*MockecsClient)(nil).DescribeService), app, env, svc)
+}
+
+// ServiceConnectServices mocks base method.
+func (m *MockecsClient) ServiceConnectServices(app, env, svc string) ([]*ecs.Service, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ServiceConnectServices", app, env, svc)
+	ret0, _ := ret[0].([]*ecs.Service)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ServiceConnectServices indicates an expected call of ServiceConnectServices.
+func (mr *MockecsClientMockRecorder) ServiceConnectServices(app, env, svc interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ServiceConnectServices", reflect.TypeOf((*MockecsClient)(nil).ServiceConnectServices), app, env, svc)
+}
+
 // TaskDefinition mocks base method.
-func (m *MockecsLocalClient) TaskDefinition(app, env, svc string) (*ecs.TaskDefinition, error) {
+func (m *MockecsClient) TaskDefinition(app, env, svc string) (*ecs.TaskDefinition, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "TaskDefinition", app, env, svc)
 	ret0, _ := ret[0].(*ecs.TaskDefinition)
@@ -1748,9 +1778,9 @@ func (m *MockecsLocalClient) TaskDefinition(app, env, svc string) (*ecs.TaskDefi
 }
 
 // TaskDefinition indicates an expected call of TaskDefinition.
-func (mr *MockecsLocalClientMockRecorder) TaskDefinition(app, env, svc interface{}) *gomock.Call {
+func (mr *MockecsClientMockRecorder) TaskDefinition(app, env, svc interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TaskDefinition", reflect.TypeOf((*MockecsLocalClient)(nil).TaskDefinition), app, env, svc)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TaskDefinition", reflect.TypeOf((*MockecsClient)(nil).TaskDefinition), app, env, svc)
 }
 
 // MocklogEventsWriter is a mock of logEventsWriter interface.
@@ -5052,19 +5082,19 @@ func (m *MockdomainHostedZoneGetter) EXPECT() *MockdomainHostedZoneGetterMockRec
 	return m.recorder
 }
 
-// DomainHostedZoneID mocks base method.
-func (m *MockdomainHostedZoneGetter) DomainHostedZoneID(domainName string) (string, error) {
+// PublicDomainHostedZoneID mocks base method.
+func (m *MockdomainHostedZoneGetter) PublicDomainHostedZoneID(domainName string) (string, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DomainHostedZoneID", domainName)
+	ret := m.ctrl.Call(m, "PublicDomainHostedZoneID", domainName)
 	ret0, _ := ret[0].(string)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// DomainHostedZoneID indicates an expected call of DomainHostedZoneID.
-func (mr *MockdomainHostedZoneGetterMockRecorder) DomainHostedZoneID(domainName interface{}) *gomock.Call {
+// PublicDomainHostedZoneID indicates an expected call of PublicDomainHostedZoneID.
+func (mr *MockdomainHostedZoneGetterMockRecorder) PublicDomainHostedZoneID(domainName interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DomainHostedZoneID", reflect.TypeOf((*MockdomainHostedZoneGetter)(nil).DomainHostedZoneID), domainName)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PublicDomainHostedZoneID", reflect.TypeOf((*MockdomainHostedZoneGetter)(nil).PublicDomainHostedZoneID), domainName)
 }
 
 // ValidateDomainOwnership mocks base method.
@@ -5223,21 +5253,6 @@ func (m *MockenvDescriber) Manifest() ([]byte, error) {
 func (mr *MockenvDescriberMockRecorder) Manifest() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Manifest", reflect.TypeOf((*MockenvDescriber)(nil).Manifest))
-}
-
-// PublicCIDRBlocks mocks base method.
-func (m *MockenvDescriber) PublicCIDRBlocks() ([]string, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PublicCIDRBlocks")
-	ret0, _ := ret[0].([]string)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// PublicCIDRBlocks indicates an expected call of PublicCIDRBlocks.
-func (mr *MockenvDescriberMockRecorder) PublicCIDRBlocks() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PublicCIDRBlocks", reflect.TypeOf((*MockenvDescriber)(nil).PublicCIDRBlocks))
 }
 
 // ValidateCFServiceDomainAliases mocks base method.
@@ -6179,6 +6194,21 @@ func (m *MockwsSelector) Workload(msg, help string) (string, error) {
 func (mr *MockwsSelectorMockRecorder) Workload(msg, help interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Workload", reflect.TypeOf((*MockwsSelector)(nil).Workload), msg, help)
+}
+
+// Workloads mocks base method.
+func (m *MockwsSelector) Workloads(msg, help string) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Workloads", msg, help)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Workloads indicates an expected call of Workloads.
+func (mr *MockwsSelectorMockRecorder) Workloads(msg, help interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Workloads", reflect.TypeOf((*MockwsSelector)(nil).Workloads), msg, help)
 }
 
 // MockstaticSourceSelector is a mock of staticSourceSelector interface.
@@ -7635,6 +7665,20 @@ func (m *MockdockerEngineRunner) EXPECT() *MockdockerEngineRunnerMockRecorder {
 	return m.recorder
 }
 
+// Build mocks base method.
+func (m *MockdockerEngineRunner) Build(arg0 context.Context, arg1 *dockerengine.BuildArguments, arg2 io.Writer) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Build", arg0, arg1, arg2)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Build indicates an expected call of Build.
+func (mr *MockdockerEngineRunnerMockRecorder) Build(arg0, arg1, arg2 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Build", reflect.TypeOf((*MockdockerEngineRunner)(nil).Build), arg0, arg1, arg2)
+}
+
 // CheckDockerEngineRunning mocks base method.
 func (m *MockdockerEngineRunner) CheckDockerEngineRunning() error {
 	m.ctrl.T.Helper()
@@ -7649,33 +7693,82 @@ func (mr *MockdockerEngineRunnerMockRecorder) CheckDockerEngineRunning() *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckDockerEngineRunning", reflect.TypeOf((*MockdockerEngineRunner)(nil).CheckDockerEngineRunning))
 }
 
-// IsContainerRunning mocks base method.
-func (m *MockdockerEngineRunner) IsContainerRunning(arg0 string) (bool, error) {
+// ContainerExitCode mocks base method.
+func (m *MockdockerEngineRunner) ContainerExitCode(ctx context.Context, containerName string) (int, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IsContainerRunning", arg0)
+	ret := m.ctrl.Call(m, "ContainerExitCode", ctx, containerName)
+	ret0, _ := ret[0].(int)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ContainerExitCode indicates an expected call of ContainerExitCode.
+func (mr *MockdockerEngineRunnerMockRecorder) ContainerExitCode(ctx, containerName interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ContainerExitCode", reflect.TypeOf((*MockdockerEngineRunner)(nil).ContainerExitCode), ctx, containerName)
+}
+
+// Exec mocks base method.
+func (m *MockdockerEngineRunner) Exec(ctx context.Context, container string, out io.Writer, cmd string, args ...string) error {
+	m.ctrl.T.Helper()
+	varargs := []interface{}{ctx, container, out, cmd}
+	for _, a := range args {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "Exec", varargs...)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Exec indicates an expected call of Exec.
+func (mr *MockdockerEngineRunnerMockRecorder) Exec(ctx, container, out, cmd interface{}, args ...interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]interface{}{ctx, container, out, cmd}, args...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Exec", reflect.TypeOf((*MockdockerEngineRunner)(nil).Exec), varargs...)
+}
+
+// IsContainerHealthy mocks base method.
+func (m *MockdockerEngineRunner) IsContainerHealthy(ctx context.Context, containerName string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsContainerHealthy", ctx, containerName)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// IsContainerHealthy indicates an expected call of IsContainerHealthy.
+func (mr *MockdockerEngineRunnerMockRecorder) IsContainerHealthy(ctx, containerName interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsContainerHealthy", reflect.TypeOf((*MockdockerEngineRunner)(nil).IsContainerHealthy), ctx, containerName)
+}
+
+// IsContainerRunning mocks base method.
+func (m *MockdockerEngineRunner) IsContainerRunning(arg0 context.Context, arg1 string) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsContainerRunning", arg0, arg1)
 	ret0, _ := ret[0].(bool)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // IsContainerRunning indicates an expected call of IsContainerRunning.
-func (mr *MockdockerEngineRunnerMockRecorder) IsContainerRunning(arg0 interface{}) *gomock.Call {
+func (mr *MockdockerEngineRunnerMockRecorder) IsContainerRunning(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsContainerRunning", reflect.TypeOf((*MockdockerEngineRunner)(nil).IsContainerRunning), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsContainerRunning", reflect.TypeOf((*MockdockerEngineRunner)(nil).IsContainerRunning), arg0, arg1)
 }
 
 // Rm mocks base method.
-func (m *MockdockerEngineRunner) Rm(arg0 string) error {
+func (m *MockdockerEngineRunner) Rm(arg0 context.Context, arg1 string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Rm", arg0)
+	ret := m.ctrl.Call(m, "Rm", arg0, arg1)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Rm indicates an expected call of Rm.
-func (mr *MockdockerEngineRunnerMockRecorder) Rm(arg0 interface{}) *gomock.Call {
+func (mr *MockdockerEngineRunnerMockRecorder) Rm(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Rm", reflect.TypeOf((*MockdockerEngineRunner)(nil).Rm), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Rm", reflect.TypeOf((*MockdockerEngineRunner)(nil).Rm), arg0, arg1)
 }
 
 // Run mocks base method.
@@ -7693,17 +7786,17 @@ func (mr *MockdockerEngineRunnerMockRecorder) Run(arg0, arg1 interface{}) *gomoc
 }
 
 // Stop mocks base method.
-func (m *MockdockerEngineRunner) Stop(arg0 string) error {
+func (m *MockdockerEngineRunner) Stop(arg0 context.Context, arg1 string) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Stop", arg0)
+	ret := m.ctrl.Call(m, "Stop", arg0, arg1)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // Stop indicates an expected call of Stop.
-func (mr *MockdockerEngineRunnerMockRecorder) Stop(arg0 interface{}) *gomock.Call {
+func (mr *MockdockerEngineRunnerMockRecorder) Stop(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stop", reflect.TypeOf((*MockdockerEngineRunner)(nil).Stop), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stop", reflect.TypeOf((*MockdockerEngineRunner)(nil).Stop), arg0, arg1)
 }
 
 // MockworkloadStackGenerator is a mock of workloadStackGenerator interface.
@@ -8151,4 +8244,41 @@ func (m *MocksecretGetter) GetSecretValue(arg0 context.Context, arg1 string) (st
 func (mr *MocksecretGetterMockRecorder) GetSecretValue(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetSecretValue", reflect.TypeOf((*MocksecretGetter)(nil).GetSecretValue), arg0, arg1)
+}
+
+// MockdockerWorkload is a mock of dockerWorkload interface.
+type MockdockerWorkload struct {
+	ctrl     *gomock.Controller
+	recorder *MockdockerWorkloadMockRecorder
+}
+
+// MockdockerWorkloadMockRecorder is the mock recorder for MockdockerWorkload.
+type MockdockerWorkloadMockRecorder struct {
+	mock *MockdockerWorkload
+}
+
+// NewMockdockerWorkload creates a new mock instance.
+func NewMockdockerWorkload(ctrl *gomock.Controller) *MockdockerWorkload {
+	mock := &MockdockerWorkload{ctrl: ctrl}
+	mock.recorder = &MockdockerWorkloadMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockdockerWorkload) EXPECT() *MockdockerWorkloadMockRecorder {
+	return m.recorder
+}
+
+// Dockerfile mocks base method.
+func (m *MockdockerWorkload) Dockerfile() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Dockerfile")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// Dockerfile indicates an expected call of Dockerfile.
+func (mr *MockdockerWorkloadMockRecorder) Dockerfile() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Dockerfile", reflect.TypeOf((*MockdockerWorkload)(nil).Dockerfile))
 }

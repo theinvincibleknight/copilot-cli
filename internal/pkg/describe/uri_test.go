@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/aws/copilot-cli/internal/pkg/aws/ecs"
+
 	"github.com/aws/copilot-cli/internal/pkg/deploy/cloudformation/stack"
 	"github.com/aws/copilot-cli/internal/pkg/describe/mocks"
 	"github.com/aws/copilot-cli/internal/pkg/template"
@@ -149,6 +151,72 @@ func TestLBWebServiceDescriber_URI(t *testing.T) {
 			},
 
 			wantedURI: "http://abc.us-west-1.elb.amazonaws.com/mySvc",
+		},
+		"swallow error if fail to get env vars with imported ALB": {
+			setupMocks: func(m lbWebSvcDescriberMocks) {
+				gomock.InOrder(
+					m.ecsDescriber.EXPECT().StackResources().Return([]*describeStack.Resource{
+						{
+							LogicalID: svcStackResourceListenerRuleForImportedALBLogicalID,
+						},
+						{
+							LogicalID: svcStackResourceALBTargetGroupLogicalID,
+						},
+					}, nil).Times(1),
+					m.ecsDescriber.EXPECT().Params().Return(map[string]string{
+						stack.WorkloadRulePathParamKey: "/",
+					}, nil),
+					m.ecsDescriber.EXPECT().StackResources().Return([]*describeStack.Resource{
+						{
+							LogicalID: svcStackResourceListenerRuleForImportedALBLogicalID,
+						},
+						{
+							LogicalID: svcStackResourceALBTargetGroupLogicalID,
+						},
+					}, nil).Times(1),
+					m.lbDescriber.EXPECT().ListenerRulesHostHeaders(nil).
+						Return(nil, nil),
+					m.ecsDescriber.EXPECT().EnvVars().Return(nil, errors.New("some error")),
+					m.envDescriber.EXPECT().Outputs().Return(nil, nil),
+				)
+			},
+
+			wantedURI: "http://",
+		},
+		"http web service with imported ALB": {
+			setupMocks: func(m lbWebSvcDescriberMocks) {
+				gomock.InOrder(
+					m.ecsDescriber.EXPECT().StackResources().Return([]*describeStack.Resource{
+						{
+							LogicalID: svcStackResourceListenerRuleForImportedALBLogicalID,
+						},
+						{
+							LogicalID: svcStackResourceALBTargetGroupLogicalID,
+						},
+					}, nil).Times(1),
+					m.ecsDescriber.EXPECT().Params().Return(map[string]string{
+						stack.WorkloadRulePathParamKey: "/",
+					}, nil),
+					m.ecsDescriber.EXPECT().StackResources().Return([]*describeStack.Resource{
+						{
+							LogicalID: svcStackResourceListenerRuleForImportedALBLogicalID,
+						},
+						{
+							LogicalID: svcStackResourceALBTargetGroupLogicalID,
+						},
+					}, nil).Times(1),
+					m.lbDescriber.EXPECT().ListenerRulesHostHeaders(nil).
+						Return(nil, nil),
+					m.ecsDescriber.EXPECT().EnvVars().Return([]*ecs.ContainerEnvVar{
+						{
+							Name:  LBDNS,
+							Value: "mockDNSName",
+						},
+					}, nil),
+				)
+			},
+
+			wantedURI: "http://mockDNSName",
 		},
 		"http web service with cloudfront": {
 			setupMocks: func(m lbWebSvcDescriberMocks) {
@@ -613,6 +681,24 @@ func TestLBWebServiceURI_String(t *testing.T) {
 
 			wanted: "http://jobs.test.phonetool.com",
 		},
+		"http with /v2 path": {
+			accessDNSNames: []string{"jobs.test.phonetool.com"},
+			accessPath:     "/v2",
+
+			wanted: "http://jobs.test.phonetool.com/v2",
+		},
+		"http with multiple slash path": {
+			accessDNSNames: []string{"jobs.test.phonetool.com"},
+			accessPath:     "//v2",
+
+			wanted: "http://jobs.test.phonetool.com/v2",
+		},
+		"http with non-root path": {
+			accessDNSNames: []string{"jobs.test.phonetool.com"},
+			accessPath:     "v2",
+
+			wanted: "http://jobs.test.phonetool.com/v2",
+		},
 		"cloudfront": {
 			accessDNSNames: []string{"abc.cloudfront.net"},
 			accessPath:     "svc",
@@ -639,6 +725,27 @@ func TestLBWebServiceURI_String(t *testing.T) {
 			accessHTTPS:    true,
 
 			wanted: "https://jobs.test.phonetool.com",
+		},
+		"https with /v2 path": {
+			accessDNSNames: []string{"jobs.test.phonetool.com"},
+			accessPath:     "/v2",
+			accessHTTPS:    true,
+
+			wanted: "https://jobs.test.phonetool.com/v2",
+		},
+		"https with multiple slash path": {
+			accessDNSNames: []string{"jobs.test.phonetool.com"},
+			accessPath:     "//v2",
+			accessHTTPS:    true,
+
+			wanted: "https://jobs.test.phonetool.com/v2",
+		},
+		"https with non-root path": {
+			accessDNSNames: []string{"jobs.test.phonetool.com"},
+			accessPath:     "v2",
+			accessHTTPS:    true,
+
+			wanted: "https://jobs.test.phonetool.com/v2",
 		},
 	}
 

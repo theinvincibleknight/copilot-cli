@@ -101,7 +101,8 @@ func TestStaticSiteService_TemplateAndParamsGeneration(t *testing.T) {
 				Version:    "v1.29.0",
 				Region:     "us-west-2",
 			},
-			ArtifactBucketName: "bucket",
+			ArtifactBucketName: "stackset-bucket",
+			ArtifactKey:        "arn:aws:kms:us-west-2:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab",
 			AssetMappingURL:    "s3://stackset-bucket/mappingfile",
 			RootUserARN:        "arn:aws:iam::123456789123:root",
 		})

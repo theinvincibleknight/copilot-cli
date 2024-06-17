@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/aws/copilot-cli/internal/pkg/aws/elbv2"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/cloudformation"
 	"github.com/aws/copilot-cli/internal/pkg/config"
@@ -29,11 +31,11 @@ const (
 // LoadBalancedWebService represents the configuration needed to create a CloudFormation stack from a load balanced web service manifest.
 type LoadBalancedWebService struct {
 	*ecsWkld
-	manifest               *manifest.LoadBalancedWebService
-	httpsEnabled           bool
-	dnsDelegationEnabled   bool
-	publicSubnetCIDRBlocks []string
-	appInfo                deploy.AppInformation
+	manifest             *manifest.LoadBalancedWebService
+	httpsEnabled         bool
+	dnsDelegationEnabled bool
+	importedALB          *elbv2.LoadBalancer
+	appInfo              deploy.AppInformation
 
 	parser loadBalancedWebSvcReadParser
 }
@@ -41,11 +43,10 @@ type LoadBalancedWebService struct {
 // LoadBalancedWebServiceOption is used to configuring an optional field for LoadBalancedWebService.
 type LoadBalancedWebServiceOption func(s *LoadBalancedWebService)
 
-// WithNLB enables Network Load Balancer in a LoadBalancedWebService.
-// TODO(Aiden): remove when NetworkLoadBalancer is forcibly updated
-func WithNLB(cidrBlocks []string) func(s *LoadBalancedWebService) {
+// WithImportedALB specifies an imported load balancer.
+func WithImportedALB(alb *elbv2.LoadBalancer) func(s *LoadBalancedWebService) {
 	return func(s *LoadBalancedWebService) {
-		s.publicSubnetCIDRBlocks = cidrBlocks
+		s.importedALB = alb
 	}
 }
 
@@ -54,10 +55,11 @@ type LoadBalancedWebServiceConfig struct {
 	App                *config.Application
 	EnvManifest        *manifest.Environment
 	Manifest           *manifest.LoadBalancedWebService
-	RawManifest        []byte // Content of the manifest file without any transformations.
+	RawManifest        string
 	RuntimeConfig      RuntimeConfig
 	RootUserARN        string
 	ArtifactBucketName string
+	ArtifactKey        string
 	Addons             NestedStackConfigurer
 }
 
@@ -97,6 +99,7 @@ func NewLoadBalancedWebService(conf LoadBalancedWebServiceConfig,
 				app:                conf.App.Name,
 				permBound:          conf.App.PermissionsBoundary,
 				artifactBucketName: conf.ArtifactBucketName,
+				artifactKey:        conf.ArtifactKey,
 				rc:                 conf.RuntimeConfig,
 				image:              conf.Manifest.ImageConfig.Image,
 				rawManifest:        conf.RawManifest,
@@ -180,6 +183,10 @@ func (s *LoadBalancedWebService) Template() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	importedALBConfig, err := s.convertImportedALB()
+	if err != nil {
+		return "", err
+	}
 	scTarget := s.manifest.ServiceConnectTarget(exposedPorts)
 	scOpts := template.ServiceConnectOpts{
 		Server: convertServiceConnectServer(s.manifest.Network.Connect, scTarget),
@@ -228,6 +235,7 @@ func (s *LoadBalancedWebService) Template() (string, error) {
 		ALBEnabled:  !s.manifest.HTTPOrBool.Disabled(),
 		GracePeriod: s.convertGracePeriod(),
 		ALBListener: albListenerConfig,
+		ImportedALB: importedALBConfig,
 
 		// NLB configs.
 		AppDNSName:           nlbConfig.appDNSName,

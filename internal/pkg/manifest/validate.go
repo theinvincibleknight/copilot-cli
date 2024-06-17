@@ -74,6 +74,7 @@ var (
 	dependsOnValidStatuses                   = []string{dependsOnStart, dependsOnComplete, dependsOnSuccess, dependsOnHealthy}
 	nlbValidProtocols                        = []string{TCP, UDP, TLS}
 	validContainerProtocols                  = []string{TCP, UDP}
+	validHealthCheckProtocols                = []string{TCP}
 	tracingValidVendors                      = []string{awsXRAY}
 	ecsRollingUpdateStrategies               = []string{ECSDefaultRollingUpdateStrategy, ECSRecreateRollingUpdateStrategy}
 
@@ -150,6 +151,18 @@ func (l LoadBalancedWebService) validate() error {
 		nlb:               &l.NLBConfig,
 	}); err != nil {
 		return fmt.Errorf("validate unique exposed ports: %w", err)
+	}
+	ports, err := l.ExposedPorts()
+	if err != nil {
+		return err
+	}
+	if err = validateHealthCheckPorts(validateHealthCheckPortsOpts{
+		exposedPorts:      ports,
+		mainContainerPort: l.ImageConfig.Port,
+		alb:               l.HTTPOrBool.HTTP,
+		nlb:               l.NLBConfig,
+	}); err != nil {
+		return fmt.Errorf("validate load balancer health check ports: %w", err)
 	}
 	return nil
 }
@@ -259,6 +272,9 @@ func (l LoadBalancedWebServiceConfig) validate() error {
 		}); err != nil {
 			return fmt.Errorf("validate Windows: %w", err)
 		}
+		if l.Network.Connect.Enabled() {
+			return fmt.Errorf("validate Windows: service connect (`network.connect`) is not supported for Windows")
+		}
 	}
 	if l.TaskConfig.IsARM() {
 		if err = validateARM(validateARMOpts{
@@ -323,6 +339,17 @@ func (b BackendService) validate() error {
 	}); err != nil {
 		return fmt.Errorf("validate unique exposed ports: %w", err)
 	}
+	exposedPortsIndex, err := b.ExposedPorts()
+	if err != nil {
+		return err
+	}
+	if err = validateHealthCheckPorts(validateHealthCheckPortsOpts{
+		exposedPorts:      exposedPortsIndex,
+		mainContainerPort: b.ImageConfig.Port,
+		alb:               b.HTTP,
+	}); err != nil {
+		return fmt.Errorf("validate load balancer health check ports: %w", err)
+	}
 	return nil
 }
 
@@ -377,6 +404,9 @@ func (b BackendServiceConfig) validate() error {
 			readOnlyFS: b.Storage.ReadonlyRootFS,
 		}); err != nil {
 			return fmt.Errorf("validate Windows: %w", err)
+		}
+		if b.Network.Connect.Enabled() {
+			return fmt.Errorf("validate Windows: service connect (`network.connect`) is not supported for Windows")
 		}
 	}
 	if b.TaskConfig.IsARM() {
@@ -1968,6 +1998,13 @@ func (s Secret) validate() error {
 	return nil
 }
 
+type validateHealthCheckPortsOpts struct {
+	exposedPorts      ExposedPortsIndex
+	mainContainerPort *uint16
+	alb               HTTP
+	nlb               NetworkLoadBalancerConfiguration
+}
+
 type validateExposedPortsOpts struct {
 	mainContainerName string
 	mainContainerPort *uint16
@@ -1981,11 +2018,6 @@ type validateDependenciesOpts struct {
 	sidecarConfig     map[string]*SidecarConfig
 	imageConfig       Image
 	logging           Logging
-}
-
-type containerDependency struct {
-	dependsOn   DependsOn
-	isEssential bool
 }
 
 type validateTargetContainerOpts struct {
@@ -2003,6 +2035,45 @@ type validateWindowsOpts struct {
 type validateARMOpts struct {
 	Spot     *int
 	SpotFrom *int
+}
+
+func validateHealthCheckPorts(opts validateHealthCheckPortsOpts) error {
+	for _, rule := range opts.alb.RoutingRules() {
+		healthCheckPort := rule.HealthCheckPort(opts.mainContainerPort)
+		if err := validateHealthCheckPort(healthCheckPort, opts.exposedPorts); err != nil {
+			return err
+		}
+	}
+
+	for _, listener := range opts.nlb.NLBListeners() {
+		healthCheckPort, err := listener.HealthCheckPort(opts.mainContainerPort)
+		if err != nil {
+			return err
+		}
+		if err := validateHealthCheckPort(healthCheckPort, opts.exposedPorts); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateHealthCheckPort(port uint16, ports ExposedPortsIndex) error {
+	container := ports.ContainerForPort[port]
+	containerPorts := ports.PortsForContainer[container]
+	for _, exposedPort := range containerPorts {
+		if exposedPort.Port != port {
+			continue
+		}
+
+		if !slices.Contains(validHealthCheckProtocols, strings.ToUpper(exposedPort.Protocol)) {
+			return &errHealthCheckPortExposedWithInvalidProtocol{
+				healthCheckPort: port,
+				container:       container,
+				protocol:        exposedPort.Protocol,
+			}
+		}
+	}
+	return nil
 }
 
 func validateTargetContainer(opts validateTargetContainerOpts) error {
@@ -2027,30 +2098,17 @@ func validateTargetContainer(opts validateTargetContainerOpts) error {
 }
 
 func validateContainerDeps(opts validateDependenciesOpts) error {
-	containerDependencies := make(map[string]containerDependency)
-	containerDependencies[opts.mainContainerName] = containerDependency{
-		dependsOn:   opts.imageConfig.DependsOn,
-		isEssential: true,
-	}
-	if !opts.logging.IsEmpty() {
-		containerDependencies[FirelensContainerName] = containerDependency{}
-	}
-	for name, config := range opts.sidecarConfig {
-		containerDependencies[name] = containerDependency{
-			dependsOn:   config.DependsOn,
-			isEssential: config.Essential == nil || aws.BoolValue(config.Essential),
-		}
-	}
+	containerDependencies := containerDependencies(opts.mainContainerName, opts.imageConfig, opts.logging, opts.sidecarConfig)
 	if err := validateDepsForEssentialContainers(containerDependencies); err != nil {
 		return err
 	}
 	return validateNoCircularDependencies(containerDependencies)
 }
 
-func validateDepsForEssentialContainers(deps map[string]containerDependency) error {
+func validateDepsForEssentialContainers(deps map[string]ContainerDependency) error {
 	for name, containerDep := range deps {
-		for dep, status := range containerDep.dependsOn {
-			if !deps[dep].isEssential {
+		for dep, status := range containerDep.DependsOn {
+			if !deps[dep].IsEssential {
 				continue
 			}
 			if err := validateEssentialContainerDependency(dep, strings.ToUpper(status)); err != nil {
@@ -2174,6 +2232,7 @@ func validateAndPopulateNLBListenerPorts(listener NetworkLoadBalancerListener, p
 	if err != nil {
 		return err
 	}
+
 	port, err := strconv.ParseUint(aws.StringValue(nlbReceiverPort), 10, 16)
 	if err != nil {
 		return err
@@ -2190,6 +2249,11 @@ func validateAndPopulateNLBListenerPorts(listener NetworkLoadBalancerListener, p
 		targetProtocol = strings.ToUpper(aws.StringValue(nlbProtocol))
 	}
 
+	// Handle TLS termination of container exposed port protocol
+	if targetProtocol == TLS {
+		targetProtocol = TCP
+	}
+
 	// Prefer `nlb.target_container`, then existing exposed port mapping, then fallback on name of main container
 	targetContainer := mainContainerName
 	if existingContainerNameAndProtocol, ok := portExposedTo[targetPort]; ok {
@@ -2204,6 +2268,7 @@ func validateAndPopulateNLBListenerPorts(listener NetworkLoadBalancerListener, p
 
 func validateAndPopulateExposedPortMapping(portExposedTo map[uint16]containerNameAndProtocol, targetPort uint16, targetProtocol string, targetContainer string) error {
 	exposedContainerAndProtocol, alreadyExposed := portExposedTo[targetPort]
+	targetProtocol = strings.ToUpper(targetProtocol)
 
 	// Port is not associated with container and protocol, populate map
 	if !alreadyExposed {
@@ -2243,7 +2308,7 @@ func validateEssentialContainerDependency(name, status string) error {
 	return fmt.Errorf("essential container %s can only have status %s", name, english.WordSeries([]string{dependsOnStart, dependsOnHealthy}, "or"))
 }
 
-func validateNoCircularDependencies(deps map[string]containerDependency) error {
+func validateNoCircularDependencies(deps map[string]ContainerDependency) error {
 	dependencies, err := buildDependencyGraph(deps)
 	if err != nil {
 		return err
@@ -2260,10 +2325,10 @@ func validateNoCircularDependencies(deps map[string]containerDependency) error {
 	return fmt.Errorf("circular container dependency chain includes the following containers: %s", cycle)
 }
 
-func buildDependencyGraph(deps map[string]containerDependency) (*graph.Graph[string], error) {
+func buildDependencyGraph(deps map[string]ContainerDependency) (*graph.Graph[string], error) {
 	dependencyGraph := graph.New[string]()
 	for name, containerDep := range deps {
-		for dep := range containerDep.dependsOn {
+		for dep := range containerDep.DependsOn {
 			if _, ok := deps[dep]; !ok {
 				return nil, fmt.Errorf("container %s does not exist", dep)
 			}

@@ -5,6 +5,7 @@ package stack
 
 import (
 	"fmt"
+	"github.com/aws/copilot-cli/internal/pkg/aws/elbv2"
 	"strconv"
 	"strings"
 
@@ -24,8 +25,19 @@ type BackendService struct {
 	manifest     *manifest.BackendService
 	httpsEnabled bool
 	albEnabled   bool
+	importedALB  *elbv2.LoadBalancer
 
 	parser backendSvcReadParser
+}
+
+// BackendServiceOption is used to configuring an optional field for LoadBalancedWebService.
+type BackendServiceOption func(s *BackendService)
+
+// WithImportedInternalALB specifies an imported load balancer.
+func WithImportedInternalALB(alb *elbv2.LoadBalancer) func(s *BackendService) {
+	return func(s *BackendService) {
+		s.importedALB = alb
+	}
 }
 
 // BackendServiceConfig contains data required to initialize a backend service stack.
@@ -34,13 +46,14 @@ type BackendServiceConfig struct {
 	EnvManifest        *manifest.Environment
 	Manifest           *manifest.BackendService
 	ArtifactBucketName string
-	RawManifest        []byte // Content of the manifest file without any transformations.
+	ArtifactKey        string
+	RawManifest        string
 	RuntimeConfig      RuntimeConfig
 	Addons             NestedStackConfigurer
 }
 
 // NewBackendService creates a new BackendService stack from a manifest file.
-func NewBackendService(conf BackendServiceConfig) (*BackendService, error) {
+func NewBackendService(conf BackendServiceConfig, opts ...BackendServiceOption) (*BackendService, error) {
 	crs, err := customresource.Backend(fs)
 	if err != nil {
 		return nil, fmt.Errorf("backend service custom resources: %w", err)
@@ -55,6 +68,7 @@ func NewBackendService(conf BackendServiceConfig) (*BackendService, error) {
 				app:                conf.App.Name,
 				permBound:          conf.App.PermissionsBoundary,
 				artifactBucketName: conf.ArtifactBucketName,
+				artifactKey:        conf.ArtifactKey,
 				rc:                 conf.RuntimeConfig,
 				image:              conf.Manifest.ImageConfig.Image,
 				rawManifest:        conf.RawManifest,
@@ -69,6 +83,9 @@ func NewBackendService(conf BackendServiceConfig) (*BackendService, error) {
 		manifest:   conf.Manifest,
 		parser:     fs,
 		albEnabled: !conf.Manifest.HTTP.IsEmpty(),
+	}
+	for _, opt := range opts {
+		opt(b)
 	}
 
 	if len(conf.EnvManifest.HTTPConfig.Private.Certificates) != 0 {
@@ -127,6 +144,10 @@ func (s *BackendService) Template() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	importedALBConfig, err := s.convertImportedALB()
+	if err != nil {
+		return "", err
+	}
 	scTarget := s.manifest.ServiceConnectTarget(exposedPorts)
 	scOpts := template.ServiceConnectOpts{
 		Server: convertServiceConnectServer(s.manifest.Network.Connect, scTarget),
@@ -178,6 +199,7 @@ func (s *BackendService) Template() (string, error) {
 		ALBEnabled:  s.albEnabled,
 		GracePeriod: s.convertGracePeriod(),
 		ALBListener: albListenerConfig,
+		ImportedALB: importedALBConfig,
 
 		// Custom Resource Config.
 		CustomResources: crs,

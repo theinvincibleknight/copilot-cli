@@ -95,7 +95,10 @@ func convertSidecars(s map[string]*manifest.SidecarConfig, exposedPorts map[stri
 	sort.Strings(keys)
 	for _, name := range keys {
 		config := s[name]
-		imageURI := rc.PushedImages[name].URI()
+		var imageURI string
+		if image, ok := rc.PushedImages[name]; ok {
+			imageURI = image.URI()
+		}
 		if uri, hasLocation := config.ImageURI(); hasLocation {
 			imageURI = uri
 		}
@@ -561,6 +564,34 @@ func (s *BackendService) convertGracePeriod() *int64 {
 	return aws.Int64(int64(manifest.DefaultHealthCheckGracePeriod))
 }
 
+func (s *BackendService) convertImportedALB() (*template.ImportedALB, error) {
+	if s.importedALB == nil {
+		return nil, nil
+	}
+	var listeners []template.LBListener
+	for _, listener := range s.importedALB.Listeners {
+		listeners = append(listeners, template.LBListener{
+			ARN:      listener.ARN,
+			Port:     listener.Port,
+			Protocol: listener.Protocol,
+		})
+	}
+	var securityGroups []template.LBSecurityGroup
+	for _, sg := range s.importedALB.SecurityGroups {
+		securityGroups = append(securityGroups, template.LBSecurityGroup{
+			ID: sg,
+		})
+	}
+	return &template.ImportedALB{
+		Name:           s.importedALB.Name,
+		ARN:            s.importedALB.ARN,
+		DNSName:        s.importedALB.DNSName,
+		HostedZoneID:   s.importedALB.HostedZoneID,
+		Listeners:      listeners,
+		SecurityGroups: securityGroups,
+	}, nil
+}
+
 type loadBalancerTargeter interface {
 	MainContainerPort() string
 	ExposedPorts() (manifest.ExposedPortsIndex, error)
@@ -688,18 +719,8 @@ func (s *LoadBalancedWebService) convertNetworkLoadBalancer() (networkLoadBalanc
 		return networkLoadBalancerConfig{}, fmt.Errorf(`convert "nlb.alias" to string slice: %w`, err)
 	}
 
-	// TODO(Aiden): remove when NetworkLoadBalancer is forcibly updated
-	var udpListenerExists bool
-	for _, listener := range listeners {
-		if strings.EqualFold(listener.Protocol, manifest.UDP) {
-			udpListenerExists = true
-		}
-	}
-
 	config := networkLoadBalancerConfig{
 		settings: &template.NetworkLoadBalancer{
-			PublicSubnetCIDRs:   s.publicSubnetCIDRBlocks,
-			UDPListenerExists:   udpListenerExists,
 			Listener:            listeners,
 			Aliases:             aliases,
 			MainContainerPort:   s.manifest.MainContainerPort(),
@@ -723,6 +744,34 @@ func (s *LoadBalancedWebService) convertGracePeriod() *int64 {
 		return aws.Int64(int64(s.manifest.NLBConfig.Listener.HealthCheck.GracePeriod.Seconds()))
 	}
 	return aws.Int64(int64(manifest.DefaultHealthCheckGracePeriod))
+}
+
+func (s *LoadBalancedWebService) convertImportedALB() (*template.ImportedALB, error) {
+	if s.importedALB == nil {
+		return nil, nil
+	}
+	var listeners []template.LBListener
+	for _, listener := range s.importedALB.Listeners {
+		listeners = append(listeners, template.LBListener{
+			ARN:      listener.ARN,
+			Port:     listener.Port,
+			Protocol: listener.Protocol,
+		})
+	}
+	var securityGroups []template.LBSecurityGroup
+	for _, sg := range s.importedALB.SecurityGroups {
+		securityGroups = append(securityGroups, template.LBSecurityGroup{
+			ID: sg,
+		})
+	}
+	return &template.ImportedALB{
+		Name:           s.importedALB.Name,
+		ARN:            s.importedALB.ARN,
+		DNSName:        s.importedALB.DNSName,
+		HostedZoneID:   s.importedALB.HostedZoneID,
+		Listeners:      listeners,
+		SecurityGroups: securityGroups,
+	}, nil
 }
 
 func convertExecuteCommand(e *manifest.ExecuteCommand) *template.ExecuteCommandOpts {
@@ -833,16 +882,33 @@ func convertMountPoints(input map[string]*manifest.Volume) []*template.MountPoin
 	if len(input) == 0 {
 		return nil
 	}
+
+	// Sort by names for consistent testing
+	var names []string
+	for name := range input {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	var output []*template.MountPoint
-	for name, volume := range input {
+	for _, name := range names {
+		volume := input[name]
 		output = append(output, convertMountPoint(aws.String(name), volume.ContainerPath, volume.ReadOnly))
 	}
 	return output
 }
 
 func convertEFSPermissions(input map[string]*manifest.Volume) []*template.EFSPermission {
+	// Sort by names for consistent testing
+	var names []string
+	for name := range input {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	var output []*template.EFSPermission
-	for _, volume := range input {
+	for _, name := range names {
+		volume := input[name]
 		// If there's no EFS configuration, we don't need to generate any permissions.
 		if volume.EmptyVolume() {
 			continue
@@ -872,8 +938,16 @@ func convertEFSPermissions(input map[string]*manifest.Volume) []*template.EFSPer
 }
 
 func convertManagedFSInfo(wlName *string, input map[string]*manifest.Volume) *template.ManagedVolumeCreationInfo {
+	// Sort by names for consistent testing
+	var names []string
+	for name := range input {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	var output *template.ManagedVolumeCreationInfo
-	for name, volume := range input {
+	for _, name := range names {
+		volume := input[name]
 		if volume.EmptyVolume() || !volume.EFS.UseManagedFS() {
 			continue
 		}
@@ -902,8 +976,16 @@ func getRandomUIDGID(name *string) uint32 {
 }
 
 func convertVolumes(input map[string]*manifest.Volume) []*template.Volume {
+	// Sort by names for consistent testing
+	var names []string
+	for name := range input {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	var output []*template.Volume
-	for name, volume := range input {
+	for _, name := range names {
+		volume := input[name]
 		// Volumes can contain either:
 		//   a) an EFS configuration, which must be valid
 		//   b) no EFS configuration, in which case the volume is created using task scratch storage in order to share
